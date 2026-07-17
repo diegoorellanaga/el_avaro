@@ -1,0 +1,82 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>El Avaro · Ensayo de diálogos</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <div id="app">
+
+    <!-- PANTALLA 1: Selección de personaje -->
+    <section id="pantalla-inicio" class="pantalla activa">
+      <header class="hero">
+        <p class="hero__kicker">Comedia en 5 actos · Molière</p>
+        <h1 class="hero__titulo">EL AVARO</h1>
+        <p class="hero__sub">Herramienta de ensayo · practica tus diálogos escena por escena</p>
+      </header>
+
+      <div class="tarjeta">
+        <h2 class="tarjeta__titulo">1 · Elige tu personaje</h2>
+        <p class="tarjeta__ayuda">Solo verás las escenas donde tu personaje interviene.</p>
+        <div id="lista-personajes" class="grid-personajes"></div>
+      </div>
+
+      <div class="tarjeta">
+        <h2 class="tarjeta__titulo">2 · Ajustes</h2>
+        <label class="switch">
+          <input type="checkbox" id="chk-solo-mis-escenas" checked />
+          <span>Mostrar solo escenas donde hablo</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="chk-audio" />
+          <span>Reproducir audio (si existe archivo)</span>
+        </label>
+      </div>
+
+      <button id="btn-empezar" class="btn btn--primario" disabled>Empezar ensayo</button>
+    </section>
+
+    <!-- PANTALLA 2: Ensayo -->
+    <section id="pantalla-ensayo" class="pantalla">
+      <div class="barra-superior">
+        <button id="btn-volver" class="btn btn--fantasma">← Cambiar personaje</button>
+        <div class="mi-personaje">
+          Tu personaje: <strong id="etq-personaje"></strong>
+        </div>
+      </div>
+
+      <div class="contexto">
+        <span id="etq-acto" class="pill"></span>
+        <span id="etq-escena" class="pill pill--sec"></span>
+        <span id="etq-progreso" class="progreso"></span>
+      </div>
+
+      <div id="tarjeta-dialogo" class="dialogo">
+        <div id="dialogo-acotacion" class="dialogo__acotacion"></div>
+        <div id="dialogo-personaje" class="dialogo__personaje"></div>
+        <div id="dialogo-texto" class="dialogo__texto"></div>
+        <button id="btn-audio" class="btn btn--audio" hidden>▶ Reproducir audio</button>
+      </div>
+
+      <div class="controles">
+        <button id="btn-anterior" class="btn btn--fantasma">← Anterior</button>
+        <button id="btn-siguiente" class="btn btn--primario">Siguiente →</button>
+      </div>
+
+      <div class="controles-sec">
+        <button id="btn-revelar" class="btn btn--fantasma" hidden>👁 Revelar mi línea</button>
+        <button id="btn-escena-ant" class="btn btn--mini">⏮ Escena anterior</button>
+        <button id="btn-escena-sig" class="btn btn--mini">Escena siguiente ⏭</button>
+      </div>
+    </section>
+
+  </div>
+
+  <audio id="reproductor" preload="none"></audio>
+
+  <script src="data.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
