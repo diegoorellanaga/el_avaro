@@ -30,8 +30,12 @@
           <span>Mostrar solo escenas donde hablo</span>
         </label>
         <label class="switch">
-          <input type="checkbox" id="chk-audio" />
-          <span>Reproducir audio (si existe archivo)</span>
+          <input type="checkbox" id="chk-audio" checked />
+          <span>Reproducir audio (y cronometrar mi turno con la duración real)</span>
+        </label>
+        <label class="switch">
+          <input type="checkbox" id="chk-auto" />
+          <span>Modo automático (encadena los diálogos solo)</span>
         </label>
       </div>
 
@@ -57,7 +61,9 @@
         <div id="dialogo-acotacion" class="dialogo__acotacion"></div>
         <div id="dialogo-personaje" class="dialogo__personaje"></div>
         <div id="dialogo-texto" class="dialogo__texto"></div>
-        <button id="btn-audio" class="btn btn--audio" hidden>▶ Reproducir audio</button>
+        <div class="barra-progreso"><div id="barra-progreso-fill" class="barra-progreso__fill"></div></div>
+        <div id="dialogo-estado" class="dialogo__estado"></div>
+        <button id="btn-audio" class="btn btn--audio" hidden>▶ Repetir audio</button>
       </div>
 
       <div class="controles">
@@ -69,6 +75,10 @@
         <button id="btn-revelar" class="btn btn--fantasma" hidden>👁 Revelar mi línea</button>
         <button id="btn-escena-ant" class="btn btn--mini">⏮ Escena anterior</button>
         <button id="btn-escena-sig" class="btn btn--mini">Escena siguiente ⏭</button>
+        <label class="switch switch--mini">
+          <input type="checkbox" id="chk-auto-ensayo" />
+          <span>Auto</span>
+        </label>
       </div>
     </section>
 

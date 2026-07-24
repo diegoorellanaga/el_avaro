@@ -3,7 +3,12 @@
    - Selección de personaje
    - Muestra solo escenas donde el personaje habla
    - Recorre diálogo por diálogo; cuando toca tu personaje muestra "TU TURNO"
-   - Audio pendiente (usa audio_url del JSON si existe)
+   - AUDIO:
+       * Líneas de otros personajes -> reproduce el audio.
+       * Tu turno -> NO suena, pero espera el mismo tiempo que dura
+         tu audio (para respetar el ritmo real de la escena).
+   - Modo AUTO: encadena los diálogos solo (al terminar el audio o la
+     espera de tu turno, avanza al siguiente).
    ==================================================================== */
 
 const OBRA = window.OBRA;
@@ -12,16 +17,26 @@ const OBRA = window.OBRA;
 const estado = {
   personaje: null,          // personaje elegido
   soloMisEscenas: true,     // filtrar escenas
-  usarAudio: false,
+  usarAudio: true,          // reproducir / cronometrar audio
+  auto: false,              // avance automático encadenado
   secuencia: [],            // lista aplanada de items {acto, escena, dialogo}
   indice: 0,                // posición actual en la secuencia
+  timerTurno: null,         // handle del temporizador de "tu turno"
+  reproduciendo: false,     // flag para evitar solapamientos
 };
+
+// Duración por defecto (segundos) si un audio no existe o no carga.
+// Se estima según la longitud del texto para que el ritmo sea razonable.
+function duracionEstimada(texto) {
+  const palabras = (texto || "").trim().split(/\s+/).filter(Boolean).length;
+  // ~2.6 palabras por segundo + un pequeño margen
+  return Math.max(1.5, palabras / 2.6 + 0.6);
+}
 
 // ---------- Utilidades ----------
 const $ = (sel) => document.querySelector(sel);
 const $$ = (sel) => document.querySelectorAll(sel);
 
-/** Cuenta cuántos diálogos tiene cada personaje en toda la obra */
 function contarParlamentos() {
   const conteo = {};
   for (const acto of OBRA.actos) {
@@ -34,7 +49,6 @@ function contarParlamentos() {
   return conteo;
 }
 
-/** Devuelve la lista de personajes parlantes ordenada por nº de líneas (desc) */
 function personajesParlantes() {
   const conteo = contarParlamentos();
   return Object.keys(conteo).sort((a, b) => conteo[b] - conteo[a]).map((nombre) => ({
@@ -43,7 +57,6 @@ function personajesParlantes() {
   }));
 }
 
-/** Construye la secuencia de diálogos a ensayar para el personaje elegido */
 function construirSecuencia() {
   const seq = [];
   for (const acto of OBRA.actos) {
@@ -96,10 +109,76 @@ function mostrarPantalla(id) {
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
+// ---------- Control de audio / temporizadores ----------
+function detenerTodo() {
+  const rep = $("#reproductor");
+  try { rep.pause(); } catch (e) {}
+  rep.onended = null;
+  rep.onerror = null;
+  if (estado.timerTurno) {
+    clearTimeout(estado.timerTurno);
+    estado.timerTurno = null;
+  }
+  detenerBarra();
+  estado.reproduciendo = false;
+}
+
+// Barra de progreso visual durante audio / espera de turno
+let barraRAF = null;
+function iniciarBarra(duracionSeg) {
+  const barra = $("#barra-progreso-fill");
+  if (!barra) return;
+  const t0 = performance.now();
+  const durMs = duracionSeg * 1000;
+  function tick(now) {
+    const p = Math.min(1, (now - t0) / durMs);
+    barra.style.width = (p * 100) + "%";
+    if (p < 1) barraRAF = requestAnimationFrame(tick);
+  }
+  barra.style.width = "0%";
+  barraRAF = requestAnimationFrame(tick);
+}
+function detenerBarra() {
+  if (barraRAF) { cancelAnimationFrame(barraRAF); barraRAF = null; }
+  const barra = $("#barra-progreso-fill");
+  if (barra) barra.style.width = "0%";
+}
+
+/**
+ * Obtiene la duración (segundos) del audio de un diálogo.
+ * Carga la metadata sin reproducir. Si falla, usa la estimación por texto.
+ */
+function obtenerDuracion(dialogo) {
+  return new Promise((resolve) => {
+    if (!dialogo.audio_url) { resolve(duracionEstimada(dialogo.texto)); return; }
+    const a = new Audio();
+    let resuelto = false;
+    const fallback = setTimeout(() => {
+      if (!resuelto) { resuelto = true; resolve(duracionEstimada(dialogo.texto)); }
+    }, 4000);
+    a.preload = "metadata";
+    a.onloadedmetadata = () => {
+      if (resuelto) return;
+      resuelto = true;
+      clearTimeout(fallback);
+      const d = isFinite(a.duration) && a.duration > 0 ? a.duration : duracionEstimada(dialogo.texto);
+      resolve(d);
+    };
+    a.onerror = () => {
+      if (resuelto) return;
+      resuelto = true;
+      clearTimeout(fallback);
+      resolve(duracionEstimada(dialogo.texto));
+    };
+    a.src = dialogo.audio_url;
+  });
+}
+
 // ---------- Ensayo ----------
 function empezarEnsayo() {
   estado.soloMisEscenas = $("#chk-solo-mis-escenas").checked;
   estado.usarAudio = $("#chk-audio").checked;
+  estado.auto = $("#chk-auto").checked;
   estado.secuencia = construirSecuencia();
   estado.indice = 0;
 
@@ -113,6 +192,7 @@ function empezarEnsayo() {
 }
 
 function renderItem() {
+  detenerTodo();
   const item = estado.secuencia[estado.indice];
   if (!item) return;
 
@@ -130,14 +210,13 @@ function renderItem() {
   const textoEl = $("#dialogo-texto");
   const btnRevelar = $("#btn-revelar");
   const btnAudio = $("#btn-audio");
+  const estadoEl = $("#dialogo-estado");
 
-  // Acotaciones
   acotEl.textContent = (dialogo.acotaciones && dialogo.acotaciones.length)
     ? dialogo.acotaciones.join(" ")
     : "";
 
   if (esMio) {
-    // TU TURNO: no mostramos el texto
     tarjeta.classList.add("turno-tuyo");
     persEl.textContent = dialogo.personaje + " (tú)";
     textoEl.classList.add("tu-turno-msg");
@@ -151,17 +230,89 @@ function renderItem() {
     btnRevelar.hidden = true;
   }
 
-  // Audio (pendiente): solo se muestra si hay url y el usuario activó audio
-  if (estado.usarAudio && dialogo.audio_url) {
-    btnAudio.hidden = false;
-  } else {
-    btnAudio.hidden = true;
-  }
+  // Botón de audio manual (repetir)
+  btnAudio.hidden = !(estado.usarAudio && dialogo.audio_url && !esMio);
 
   // Botones extremos
   $("#btn-anterior").disabled = estado.indice === 0;
   $("#btn-siguiente").textContent =
     estado.indice === estado.secuencia.length - 1 ? "Fin ✓" : "Siguiente →";
+
+  if (estadoEl) estadoEl.textContent = "";
+
+  // --- Comportamiento de audio / tiempo ---
+  if (!estado.usarAudio) return; // sin audio: navegación manual pura
+
+  if (esMio) {
+    // TU TURNO: no suena, pero esperamos el mismo tiempo que dura tu audio
+    obtenerDuracion(dialogo).then((dur) => {
+      if (estadoEl) estadoEl.textContent = "⏳ Tu turno (silencio) · " + dur.toFixed(1) + "s";
+      iniciarBarra(dur);
+      estado.timerTurno = setTimeout(() => {
+        detenerBarra();
+        if (estadoEl) estadoEl.textContent = "✓ Turno listo";
+        if (estado.auto) siguiente();
+      }, dur * 1000);
+    });
+  } else {
+    // OTRO PERSONAJE: reproducir audio
+    reproducirActual(true);
+  }
+}
+
+/**
+ * Reproduce el audio del diálogo actual.
+ * @param {boolean} encadenar  si true y modo auto, avanza al terminar.
+ */
+function reproducirActual(encadenar) {
+  const item = estado.secuencia[estado.indice];
+  if (!item) return;
+  const dialogo = item.dialogo;
+  const estadoEl = $("#dialogo-estado");
+
+  if (!dialogo.audio_url) {
+    // sin archivo: cronometramos con estimación
+    const dur = duracionEstimada(dialogo.texto);
+    if (estadoEl) estadoEl.textContent = "🔇 Sin audio · " + dur.toFixed(1) + "s";
+    iniciarBarra(dur);
+    estado.timerTurno = setTimeout(() => {
+      detenerBarra();
+      if (encadenar && estado.auto) siguiente();
+    }, dur * 1000);
+    return;
+  }
+
+  const rep = $("#reproductor");
+  rep.src = dialogo.audio_url;
+  rep.currentTime = 0;
+  estado.reproduciendo = true;
+
+  rep.onloadedmetadata = () => {
+    if (isFinite(rep.duration) && rep.duration > 0) iniciarBarra(rep.duration);
+  };
+  rep.onended = () => {
+    estado.reproduciendo = false;
+    detenerBarra();
+    if (estadoEl) estadoEl.textContent = "✓ Reproducido";
+    if (encadenar && estado.auto) siguiente();
+  };
+  rep.onerror = () => {
+    // si el archivo no carga, cronometramos con estimación
+    estado.reproduciendo = false;
+    const dur = duracionEstimada(dialogo.texto);
+    if (estadoEl) estadoEl.textContent = "⚠ Audio no disponible · " + dur.toFixed(1) + "s";
+    iniciarBarra(dur);
+    estado.timerTurno = setTimeout(() => {
+      detenerBarra();
+      if (encadenar && estado.auto) siguiente();
+    }, dur * 1000);
+  };
+
+  if (estadoEl) estadoEl.textContent = "▶ Reproduciendo…";
+  rep.play().catch(() => {
+    // El navegador puede bloquear autoplay hasta que haya interacción.
+    if (estadoEl) estadoEl.textContent = "🔈 Pulsa ▶ para escuchar (autoplay bloqueado)";
+  });
 }
 
 function revelarLinea() {
@@ -177,6 +328,8 @@ function siguiente() {
   if (estado.indice < estado.secuencia.length - 1) {
     estado.indice++;
     renderItem();
+  } else {
+    detenerTodo();
   }
 }
 
@@ -187,7 +340,6 @@ function anterior() {
   }
 }
 
-/** Salta al primer diálogo de la escena anterior/siguiente dentro de la secuencia */
 function saltarEscena(direccion) {
   const actual = estado.secuencia[estado.indice];
   const claveActual = actual.actoNum + "-" + actual.escenaNum;
@@ -198,7 +350,6 @@ function saltarEscena(direccion) {
       if (k !== claveActual) { estado.indice = i; renderItem(); return; }
     }
   } else {
-    // buscar inicio de la escena actual; si ya estamos al inicio, ir a la anterior
     let inicioActual = estado.indice;
     while (inicioActual > 0) {
       const k = estado.secuencia[inicioActual - 1].actoNum + "-" + estado.secuencia[inicioActual - 1].escenaNum;
@@ -209,7 +360,6 @@ function saltarEscena(direccion) {
       estado.indice = inicioActual; renderItem(); return;
     }
     if (inicioActual > 0) {
-      // ir al inicio de la escena previa
       const prevKey = estado.secuencia[inicioActual - 1].actoNum + "-" + estado.secuencia[inicioActual - 1].escenaNum;
       let j = inicioActual - 1;
       while (j > 0) {
@@ -222,26 +372,33 @@ function saltarEscena(direccion) {
   }
 }
 
-function reproducirAudio() {
+// Botón manual: repite el audio del diálogo actual (sin encadenar)
+function repetirAudio() {
   const item = estado.secuencia[estado.indice];
-  if (!item || !item.dialogo.audio_url) return;
-  const rep = $("#reproductor");
-  rep.src = item.dialogo.audio_url;
-  rep.play().catch(() => alert("No se pudo reproducir el audio. Verifica que el archivo exista."));
+  if (!item || item.esMio) return;
+  detenerTodo();
+  reproducirActual(false);
+}
+
+// Alternar modo auto en caliente
+function toggleAuto() {
+  estado.auto = $("#chk-auto-ensayo").checked;
 }
 
 // ---------- Eventos ----------
 function initEventos() {
   $("#btn-empezar").addEventListener("click", empezarEnsayo);
-  $("#btn-volver").addEventListener("click", () => mostrarPantalla("#pantalla-inicio"));
+  $("#btn-volver").addEventListener("click", () => { detenerTodo(); mostrarPantalla("#pantalla-inicio"); });
   $("#btn-siguiente").addEventListener("click", siguiente);
   $("#btn-anterior").addEventListener("click", anterior);
   $("#btn-revelar").addEventListener("click", revelarLinea);
   $("#btn-escena-sig").addEventListener("click", () => saltarEscena(1));
   $("#btn-escena-ant").addEventListener("click", () => saltarEscena(-1));
-  $("#btn-audio").addEventListener("click", reproducirAudio);
+  $("#btn-audio").addEventListener("click", repetirAudio);
 
-  // Teclado: flechas para navegar, espacio para revelar
+  const chkAutoEnsayo = $("#chk-auto-ensayo");
+  if (chkAutoEnsayo) chkAutoEnsayo.addEventListener("change", toggleAuto);
+
   document.addEventListener("keydown", (e) => {
     if (!$("#pantalla-ensayo").classList.contains("activa")) return;
     if (e.key === "ArrowRight") { siguiente(); }
